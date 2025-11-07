@@ -13,6 +13,7 @@ from groq import Groq
 from transformers import pipeline
 import os
 from dotenv import load_dotenv
+import traceback
 
 # =============================================================================
 # CONFIGURACIÓN GENERAL
@@ -118,11 +119,13 @@ else:
 
                 except Exception as e:
                     st.error(f"Error al conectar con GROQ: {e}")
+                    st.text(traceback.format_exc())
 
     elif provider == "Hugging Face":
         st.subheader("🤗 Análisis con Hugging Face")
 
         hf_api_key = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+        st.text(f"DEBUG: Hugging Face token: {hf_api_key is not None}")
         if not hf_api_key:
             st.error("❌ No se encontró HUGGINGFACEHUB_API_TOKEN en .env")
         else:
@@ -134,6 +137,7 @@ else:
             if st.button("Ejecutar análisis Hugging Face", type="primary"):
                 try:
                     with st.spinner("Analizando con Hugging Face..."):
+                        st.text("DEBUG: Inicializando pipeline...")
 
                         if task == "Resumir texto":
                             summarizer = pipeline(
@@ -142,6 +146,7 @@ else:
                                 device=-1,
                                 use_auth_token=hf_api_key
                             )
+                            st.text("DEBUG: Pipeline de resumen cargado")
                             result = summarizer(text_input, max_length=100, min_length=25, do_sample=False)
                             output = result[0]["summary_text"]
 
@@ -153,6 +158,7 @@ else:
                                 device=-1,
                                 use_auth_token=hf_api_key
                             )
+                            st.text("DEBUG: Pipeline NER cargado")
                             entities = ner_model(text_input)
                             output = "\n".join([f"{ent['word']} → {ent['entity_group']}" for ent in entities])
 
@@ -163,6 +169,7 @@ else:
                                 device=-1,
                                 use_auth_token=hf_api_key
                             )
+                            st.text("DEBUG: Pipeline traducción cargado")
                             translation = translator(text_input)
                             output = translation[0]["translation_text"]
 
@@ -172,6 +179,7 @@ else:
 
                 except Exception as e:
                     st.error(f"Error al usar Hugging Face: {e}")
+                    st.text(traceback.format_exc())
 
 # =============================================================================
 # SIDEBAR: Información
