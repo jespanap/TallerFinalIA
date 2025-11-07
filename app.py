@@ -92,7 +92,7 @@ else:
                 ["Resumir texto", "Identificar entidades", "Traducir al inglés"]
             )
 
-            if st.button("Ejecutar análisis", type="primary"):
+            if st.button("Ejecutar análisis GROQ", type="primary"):
                 system_prompts = {
                     "Resumir texto": "Resume el siguiente texto en 3 puntos clave concisos:",
                     "Identificar entidades": "Extrae las entidades principales (personas, lugares, organizaciones, fechas):",
@@ -122,36 +122,53 @@ else:
     elif provider == "Hugging Face":
         st.subheader("🤗 Análisis con Hugging Face")
 
-        hf_api_key = os.getenv("HUGGINGFACE_API_KEY")
+        hf_api_key = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         if not hf_api_key:
-            st.error("❌ No se encontró HUGGINGFACE_API_KEY en .env")
+            st.error("❌ No se encontró HUGGINGFACEHUB_API_TOKEN en .env")
         else:
             task = st.selectbox(
                 "Tarea a realizar:",
                 ["Resumir texto", "Identificar entidades", "Traducir al inglés"]
             )
 
-            if st.button("Ejecutar análisis", type="primary"):
+            if st.button("Ejecutar análisis Hugging Face", type="primary"):
                 try:
                     with st.spinner("Analizando con Hugging Face..."):
+
                         if task == "Resumir texto":
-                            summarizer = pipeline("summarization", model="facebook/bart-base", token=hf_api_key)
+                            summarizer = pipeline(
+                                "summarization",
+                                model="facebook/bart-base",
+                                device=-1,
+                                use_auth_token=hf_api_key
+                            )
                             result = summarizer(text_input, max_length=100, min_length=25, do_sample=False)
                             output = result[0]["summary_text"]
 
                         elif task == "Identificar entidades":
-                            ner_model = pipeline("ner", model="Davlan/distilbert-base-multilingual-cased-ner-hrl", token=hf_api_key)
+                            ner_model = pipeline(
+                                "ner",
+                                model="Davlan/distilbert-base-multilingual-cased-ner-hrl",
+                                aggregation_strategy="simple",
+                                device=-1,
+                                use_auth_token=hf_api_key
+                            )
                             entities = ner_model(text_input)
                             output = "\n".join([f"{ent['word']} → {ent['entity_group']}" for ent in entities])
 
                         elif task == "Traducir al inglés":
-                            translator = pipeline("translation", model="Helsinki-NLP/opus-mt-es-en", token=hf_api_key)
+                            translator = pipeline(
+                                "translation",
+                                model="Helsinki-NLP/opus-mt-es-en",
+                                device=-1,
+                                use_auth_token=hf_api_key
+                            )
                             translation = translator(text_input)
                             output = translation[0]["translation_text"]
 
-                        st.subheader("🧠 Resultado del análisis:")
-                        st.write(output)
-                        st.info(f"Modelo utilizado: {task}")
+                    st.subheader("🧠 Resultado del análisis:")
+                    st.write(output)
+                    st.info(f"Modelo utilizado: {task}")
 
                 except Exception as e:
                     st.error(f"Error al usar Hugging Face: {e}")
@@ -178,7 +195,7 @@ with st.sidebar:
 
     st.markdown("---")
     groq_key = os.getenv("GROQ_API_KEY")
-    hf_key = os.getenv("HUGGINGFACE_API_KEY")
+    hf_key = os.getenv("HUGGINGFACEHUB_API_TOKEN")
 
     if groq_key:
         st.success("GROQ configurado")
