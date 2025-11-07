@@ -10,10 +10,11 @@ import easyocr
 from PIL import Image
 import numpy as np
 from groq import Groq
-from transformers import pipeline
 import os
 from dotenv import load_dotenv
-import traceback
+import re
+
+from transformers import pipeline
 
 # =============================================================================
 # CONFIGURACIÓN GENERAL
@@ -29,6 +30,70 @@ st.set_page_config(
 st.title("🧠 Taller IA: OCR + LLM")
 st.markdown("### Aplicación Multimodal con Visión Artificial y Procesamiento de Lenguaje Natural")
 st.markdown("---")
+
+# =============================================================================
+# HELPERS: Hugging Face Pipelines Locales
+# =============================================================================
+DEFAULT_HF_MAX_TOKENS = 256
+
+def _clean_ticks(s: str) -> str:
+    """Limpia horas/timestamps tipo 10:30 y normaliza bullets/espacios."""
+    s = re.sub(r"\b\d{1,2}:\d{2}\b", "", s)
+    s = re.sub(r"[•\-\u2022]+\s*", "• ", s)
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
+    return s
+
+@st.cache_resource(show_spinner=False)
+def _local_summarizer_fast():
+    return pipeline("summarization", model="facebook/bart-base")
+
+def hf_summarize(text, max_tokens=DEFAULT_HF_MAX_TOKENS):
+    try:
+        pipe = _local_summarizer_fast()
+        out = pipe(text, max_length=min(256, int(max_tokens)), do_sample=False)
+        return out[0]["summary_text"] if out else ""
+    except Exception as e:
+        st.error(f"Resumen rápido falló: {e}")
+        return ""
+
+@st.cache_resource(show_spinner=False)
+def _local_ner_fast():
+    return pipeline(
+        "token-classification",
+        model="Davlan/distilbert-base-multilingual-cased-ner-hrl",
+        aggregation_strategy="simple"
+    )
+
+def hf_entities(text, max_tokens=DEFAULT_HF_MAX_TOKENS):
+    try:
+        ner = _local_ner_fast()
+        ents = ner(text)
+        cat_map = {
+            "PER": "PERSONA",
+            "ORG": "ORGANIZACIÓN",
+            "LOC": "LUGAR",
+            "MISC": "OTRA",
+            "DATE": "FECHA",
+        }
+        lines = [f"• [{cat_map.get(e.get('entity_group', 'MISC'))}]: {e.get('word','').strip()}"
+                 for e in ents if e.get('word')]
+        return "\n".join(lines) if lines else "• [INFO]: No se detectaron entidades claras."
+    except Exception as e:
+        st.error(f"NER rápido falló: {e}")
+        return ""
+
+@st.cache_resource(show_spinner=False)
+def _local_translator_es_en_fast():
+    return pipeline("translation", model="Helsinki-NLP/opus-mt-es-en")
+
+def hf_translate_to_english(text, max_tokens=DEFAULT_HF_MAX_TOKENS):
+    try:
+        translator = _local_translator_es_en_fast()
+        out = translator(text, max_length=min(256, int(max_tokens)))
+        return out[0]["translation_text"] if out else ""
+    except Exception as e:
+        st.error(f"Traducción local falló: {e}")
+        return ""
 
 # =============================================================================
 # MÓDULO 1: OCR
@@ -76,14 +141,12 @@ else:
     text_input = st.session_state['extracted_text']
     provider = st.radio("Proveedor:", ["GROQ", "Hugging Face"])
 
-    # Parámetros generales
     temperature = st.slider("Creatividad (temperature):", 0.0, 2.0, 0.7, 0.1)
     max_tokens = st.slider("Máx. tokens (longitud):", 50, 2000, 500, 50)
     st.markdown("---")
 
     if provider == "GROQ":
         st.subheader("💬 Análisis con GROQ (llama-3.1-8b-instant)")
-
         groq_api_key = os.getenv("GROQ_API_KEY")
         if not groq_api_key:
             st.error("❌ No se encontró GROQ_API_KEY en .env")
@@ -92,14 +155,12 @@ else:
                 "Tarea a realizar:",
                 ["Resumir texto", "Identificar entidades", "Traducir al inglés"]
             )
-
             if st.button("Ejecutar análisis GROQ", type="primary"):
                 system_prompts = {
                     "Resumir texto": "Resume el siguiente texto en 3 puntos clave concisos:",
                     "Identificar entidades": "Extrae las entidades principales (personas, lugares, organizaciones, fechas):",
                     "Traducir al inglés": "Traduce el siguiente texto al inglés:"
                 }
-
                 client = Groq(api_key=groq_api_key)
                 try:
                     with st.spinner("Analizando con GROQ..."):
@@ -116,16 +177,12 @@ else:
                         st.subheader("🧠 Respuesta del modelo:")
                         st.write(response)
                         st.info(f"Modelo: llama-3.1-8b-instant | Tarea: {task}")
-
                 except Exception as e:
                     st.error(f"Error al conectar con GROQ: {e}")
-                    st.text(traceback.format_exc())
 
     elif provider == "Hugging Face":
         st.subheader("🤗 Análisis con Hugging Face")
-
         hf_api_key = os.getenv("HUGGINGFACEHUB_API_TOKEN")
-        st.text(f"DEBUG: Hugging Face token: {hf_api_key is not None}")
         if not hf_api_key:
             st.error("❌ No se encontró HUGGINGFACEHUB_API_TOKEN en .env")
         else:
@@ -133,53 +190,20 @@ else:
                 "Tarea a realizar:",
                 ["Resumir texto", "Identificar entidades", "Traducir al inglés"]
             )
-
             if st.button("Ejecutar análisis Hugging Face", type="primary"):
                 try:
                     with st.spinner("Analizando con Hugging Face..."):
-                        st.text("DEBUG: Inicializando pipeline...")
-
                         if task == "Resumir texto":
-                            summarizer = pipeline(
-                                "summarization",
-                                model="facebook/bart-base",
-                                device=-1,
-                                use_auth_token=hf_api_key
-                            )
-                            st.text("DEBUG: Pipeline de resumen cargado")
-                            result = summarizer(text_input, max_length=100, min_length=25, do_sample=False)
-                            output = result[0]["summary_text"]
-
+                            output = hf_summarize(text_input, max_tokens)
                         elif task == "Identificar entidades":
-                            ner_model = pipeline(
-                                "ner",
-                                model="Davlan/distilbert-base-multilingual-cased-ner-hrl",
-                                aggregation_strategy="simple",
-                                device=-1,
-                                use_auth_token=hf_api_key
-                            )
-                            st.text("DEBUG: Pipeline NER cargado")
-                            entities = ner_model(text_input)
-                            output = "\n".join([f"{ent['word']} → {ent['entity_group']}" for ent in entities])
-
+                            output = hf_entities(text_input, max_tokens)
                         elif task == "Traducir al inglés":
-                            translator = pipeline(
-                                "translation",
-                                model="Helsinki-NLP/opus-mt-es-en",
-                                device=-1,
-                                use_auth_token=hf_api_key
-                            )
-                            st.text("DEBUG: Pipeline traducción cargado")
-                            translation = translator(text_input)
-                            output = translation[0]["translation_text"]
-
+                            output = hf_translate_to_english(text_input, max_tokens)
                     st.subheader("🧠 Resultado del análisis:")
                     st.write(output)
                     st.info(f"Modelo utilizado: {task}")
-
                 except Exception as e:
                     st.error(f"Error al usar Hugging Face: {e}")
-                    st.text(traceback.format_exc())
 
 # =============================================================================
 # SIDEBAR: Información
